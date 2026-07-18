@@ -11,7 +11,7 @@ export function MenuGrid({ items, activeCategory, onAdd }: MenuGridProps) {
     activeCategory === 'All' ? items : items.filter((i) => i.category === activeCategory);
 
   return (
-    <div className="menu-scroll">
+    <div className="menu-scroll" style={{ minHeight: 0 }}>
       {filtered.length === 0 ? (
         <div className="empty-bill">
           <div>🍽</div>

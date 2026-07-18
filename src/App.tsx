@@ -67,8 +67,8 @@ function App() {
         hasItems={tableHasItems}
       />
 
-      <div className="bill-area">
-        <div className="order-panel">
+      <div className="bill-area" style={{ minHeight: 0 }}>
+        <div className="order-panel" style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div className="order-header">
             <h2>Menu</h2>
           </div>
