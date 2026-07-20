@@ -79,7 +79,15 @@ export function BillPanel({
   return (
     <div
       className={`bill-panel ${collapsed ? 'bp-collapsed' : ''}`}
-      style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flexShrink: 0,
+        position: 'sticky',
+        bottom: 0,
+        zIndex: 5,
+        background: 'var(--bg)',
+      }}
     >
       <div className="bill-top" onClick={toggleCollapse} style={{ flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
