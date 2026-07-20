@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MenuItem, TableOrder } from '../../types';
 import { buildBillEscPosBytes } from '../../utils/escpos';
 import { saveOrderToDB } from '../../utils/saveOrder';
@@ -34,9 +34,18 @@ export function BillPanel({
 }: BillPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 640);
+
+  useEffect(() => {
+    function handleResize() {
+      setIsMobile(window.innerWidth <= 640);
+    }
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   function toggleCollapse() {
-    if (window.innerWidth > 640) return; // desktop: no-op, matches old app
+    if (!isMobile) return; // desktop: no-op, matches old app
     setCollapsed((c) => !c);
   }
 
@@ -79,15 +88,21 @@ export function BillPanel({
   return (
     <div
       className={`bill-panel ${collapsed ? 'bp-collapsed' : ''}`}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        flexShrink: 0,
-        position: 'sticky',
-        bottom: 0,
-        zIndex: 5,
-        background: 'var(--bg)',
-      }}
+      style={
+        isMobile
+          ? {
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'fixed',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              zIndex: 50,
+              background: 'var(--bg)',
+              boxShadow: '0 -4px 16px rgba(0,0,0,0.4)',
+            }
+          : { display: 'flex', flexDirection: 'column', flexShrink: 0 }
+      }
     >
       <div className="bill-top" onClick={toggleCollapse} style={{ flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
