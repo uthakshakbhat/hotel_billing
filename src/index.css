@@ -6,7 +6,7 @@
     --text-muted:#61787d; --red:#ef5f5a; --green:#34d399; --radius:10px;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
-  html,body{height:100%;overflow:hidden;}
+  html,body{min-height:100%;}
   body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;-webkit-tap-highlight-color:transparent;}
 
   /* ── HEADER ── */
