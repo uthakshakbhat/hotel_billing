@@ -79,7 +79,7 @@ export function BillPanel({
   return (
     <div
       className={`bill-panel ${collapsed ? 'bp-collapsed' : ''}`}
-      style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}
     >
       <div className="bill-top" onClick={toggleCollapse} style={{ flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -96,7 +96,7 @@ export function BillPanel({
 
       {!collapsed && (
         <>
-          <div className="bill-items" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+          <div className="bill-items" style={{ maxHeight: '30vh', overflowY: 'auto' }}>
             {lineItems.length === 0 ? (
               <div className="empty-bill">
                 <div>🧾</div>
