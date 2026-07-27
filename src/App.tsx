@@ -11,6 +11,7 @@ import { TableBar } from './components/TableBar';
 import { BillPanel } from './components/Bill/BillPanel';
 import { LedgerModal } from './components/Ledger/LedgerModal';
 import { ManageMenuSidebar } from './components/Sidebar/ManageMenuSidebar';
+import { OpsAssistant } from './components/Assistant/OpsAssistant';
 
 function App() {
   const { loading, user, settings, needsSetup, loginWithGoogle, saveSetup, logout } = useAuth();
@@ -30,6 +31,7 @@ function App() {
   const [activeCategory, setActiveCategory] = useState('All');
   const [ledgerOpen, setLedgerOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
 
   if (loading) {
     return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading...</div>;
@@ -54,6 +56,7 @@ function App() {
           </div>
         </div>
         <div className="header-right">
+          <button className="ledger-btn" onClick={() => setAssistantOpen(true)} title="Ops Assistant">🤖</button>
           <button className="ledger-btn" onClick={() => setLedgerOpen(true)} title="Daily Ledger">📒</button>
           <button className="hamburger-btn" onClick={() => setSidebarOpen(true)} title="Manage Menu">☰</button>
           <button className="hamburger-btn" onClick={logout} title="Sign out">⏻</button>
@@ -110,6 +113,8 @@ function App() {
         items={items}
         onReload={reloadMenu}
       />
+
+      <OpsAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
     </div>
   );
 }
