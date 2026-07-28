@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import type { useLedger } from '../../hooks/useLedger';
 
 export function SummaryTab({ ledger }: { ledger: ReturnType<typeof useLedger> }) {
-  const { totalIncome, totalOut, balance, payments, expenses, employees, loading } = ledger;
+  const { totalIncome, totalOut, balance, payments, expenses, employees, loading, ledgerDate } = ledger;
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState('');
 
   if (loading) return <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>Loading...</p>;
 
@@ -19,6 +22,24 @@ export function SummaryTab({ ledger }: { ledger: ReturnType<typeof useLedger> })
       amount: e.amount,
     })),
   ];
+
+  async function sendWhatsAppNow() {
+    setSending(true);
+    setSendResult('');
+    try {
+      const res = await fetch('/api/daily-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: ledgerDate }),
+      });
+      const data = await res.json();
+      setSendResult(res.ok ? '✓ Sent to WhatsApp' : `Failed: ${data.error}`);
+    } catch (e) {
+      setSendResult('Failed — check connection');
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     <>
@@ -57,6 +78,15 @@ export function SummaryTab({ ledger }: { ledger: ReturnType<typeof useLedger> })
           ))
         )}
       </div>
+
+      <button className="print-btn" style={{ marginTop: 16 }} onClick={sendWhatsAppNow} disabled={sending}>
+        {sending ? 'Sending...' : '📤 Send This Day to WhatsApp Now'}
+      </button>
+      {sendResult && (
+        <p style={{ textAlign: 'center', fontSize: 13, marginTop: 8, color: sendResult.startsWith('✓') ? 'var(--green)' : 'var(--red)' }}>
+          {sendResult}
+        </p>
+      )}
     </>
   );
 }
