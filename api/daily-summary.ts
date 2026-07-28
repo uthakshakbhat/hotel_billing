@@ -1,15 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
-// Service role key bypasses RLS — this is safe ONLY because this code runs
-// server-side (never sent to the browser) and we explicitly scope every
-// query below to OWNER_USER_ID ourselves.
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
 const OWNER_USER_ID = process.env.OWNER_USER_ID!;
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID!;
 const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN!;
-const WHATSAPP_RECIPIENT = process.env.WHATSAPP_RECIPIENT!; // your number, digits only, with country code, e.g. 919876543210
+// Comma-separated list, digits only with country code, e.g. "919876543210,919123456789"
+const WHATSAPP_RECIPIENTS = (process.env.WHATSAPP_RECIPIENTS ?? '').split(',').map((n) => n.trim()).filter(Boolean);
 
 function todayISO() {
   return new Date().toISOString().split('T')[0];
@@ -63,7 +61,7 @@ async function buildSummaryMessage(date: string, hotelName: string): Promise<str
   return msg;
 }
 
-async function sendWhatsApp(text: string) {
+async function sendWhatsAppTo(recipient: string, text: string) {
   const url = `https://graph.facebook.com/v25.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
   const res = await fetch(url, {
     method: 'POST',
@@ -73,13 +71,13 @@ async function sendWhatsApp(text: string) {
     },
     body: JSON.stringify({
       messaging_product: 'whatsapp',
-      to: WHATSAPP_RECIPIENT,
+      to: recipient,
       type: 'text',
       text: { body: text },
     }),
   });
   const body = await res.json();
-  if (!res.ok) throw new Error(`WhatsApp send failed: ${JSON.stringify(body)}`);
+  if (!res.ok) throw new Error(`WhatsApp send to ${recipient} failed: ${JSON.stringify(body)}`);
   return body;
 }
 
@@ -94,9 +92,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const hotelName = settings?.hotel_name ?? 'Restaurant';
     const message = await buildSummaryMessage(date, hotelName);
-    await sendWhatsApp(message);
 
-    return res.status(200).json({ ok: true, message });
+    if (WHATSAPP_RECIPIENTS.length === 0) {
+      return res.status(400).json({ error: 'No recipients configured (WHATSAPP_RECIPIENTS is empty)' });
+    }
+
+    const results = await Promise.allSettled(WHATSAPP_RECIPIENTS.map((r) => sendWhatsAppTo(r, message)));
+    const failures = results
+      .map((r, i) => (r.status === 'rejected' ? `${WHATSAPP_RECIPIENTS[i]}: ${(r as PromiseRejectedResult).reason}` : null))
+      .filter(Boolean);
+
+    if (failures.length > 0) {
+      return res.status(207).json({ ok: false, sentTo: WHATSAPP_RECIPIENTS.length - failures.length, failures });
+    }
+    return res.status(200).json({ ok: true, sentTo: WHATSAPP_RECIPIENTS.length, message });
   } catch (e: any) {
     console.error(e);
     return res.status(500).json({ error: e.message || 'Failed to send summary' });
