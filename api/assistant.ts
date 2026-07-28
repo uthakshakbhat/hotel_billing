@@ -1,12 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType, type Tool } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 const MENU_CATEGORIES =
   'South Indian Breakfast, Evening Snacks, Seasonal, Flatbreads, Dosa, Combos, Hot Beverages, Cold Beverages, Occasional Dosas';
 
-const tools = [
+const tools: Tool[] = [
   {
     functionDeclarations: [
       {
