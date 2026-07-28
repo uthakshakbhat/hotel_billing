@@ -4,7 +4,7 @@ import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 const MENU_CATEGORIES =
-  'South Indian Breakfast, Evening Snacks, Seasonal, Flatbreads, Dosa, Combos, Hot Beverages, Cold Beverages, Occasional Dosas, Parcels';
+  'South Indian Breakfast, Evening Snacks, Seasonal, Flatbreads, Dosa, Combos, Hot Beverages, Cold Beverages, Occasional Dosas';
 
 const tools = [
   {
@@ -71,7 +71,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const today = new Date().toISOString().split('T')[0];
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    // 'gemini-flash-latest' is an alias Google keeps pointed at their current
+    // recommended Flash model, so this stays working even as they retire
+    // specific dated model names (which is what broke gemini-2.5-flash).
+    model: 'gemini-flash-latest',
     tools,
     systemInstruction: `You are an operations assistant for a restaurant billing app. Today's date is ${today}. When the user asks to record an expense, a staff payment, or add a menu item, call the matching function. When they ask about sales, income, expenses, or balance for a time period, call get_summary with the correct date range computed from today's date (e.g. "this week" = the last 7 days including today, "this month" = the last 30 days, "today" = just today for both from and to). If the request is unclear or unrelated to restaurant operations, reply in plain text asking for clarification.`,
   });
