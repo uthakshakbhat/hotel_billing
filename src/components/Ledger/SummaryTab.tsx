@@ -33,7 +33,14 @@ export function SummaryTab({ ledger }: { ledger: ReturnType<typeof useLedger> })
         body: JSON.stringify({ date: ledgerDate }),
       });
       const data = await res.json();
-      setSendResult(res.ok ? '✓ Sent to WhatsApp' : `Failed: ${data.error}`);
+
+      if (data.ok === true) {
+        setSendResult(`✓ Sent to ${data.sentTo} recipient(s)`);
+      } else if (data.ok === false) {
+        setSendResult(`⚠ Sent to ${data.sentTo} of them. Failed: ${(data.failures ?? []).join(' | ')}`);
+      } else {
+        setSendResult(`Failed: ${data.error ?? 'Unknown error'}`);
+      }
     } catch (e) {
       setSendResult('Failed — check connection');
     } finally {
