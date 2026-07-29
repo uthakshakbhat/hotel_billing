@@ -12,6 +12,7 @@ import { BillPanel } from './components/Bill/BillPanel';
 import { LedgerModal } from './components/Ledger/LedgerModal';
 import { ManageMenuSidebar } from './components/Sidebar/ManageMenuSidebar';
 import { OpsAssistant } from './components/Assistant/OpsAssistant';
+import { VoiceOrderButton } from './components/Menu/VoiceOrderButton';
 
 function App() {
   const { loading, user, settings, needsSetup, loginWithGoogle, saveSetup, logout } = useAuth();
@@ -76,6 +77,7 @@ function App() {
             <h2>Menu</h2>
           </div>
           <CategoryFilter activeCategory={activeCategory} onSelect={setActiveCategory} />
+          <VoiceOrderButton menuItems={items} onAddItem={addItem} />
           {menuLoading && <p style={{ padding: 20, color: 'var(--text-muted)' }}>Loading menu...</p>}
           {menuError && <p style={{ padding: 20, color: 'var(--red)' }}>Error: {menuError}</p>}
           {!menuLoading && !menuError && (
