@@ -6,14 +6,19 @@ const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SE
 const OWNER_USER_ID = process.env.OWNER_USER_ID!;
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID!;
 const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN!;
-// Comma-separated list, digits only with country code, e.g. "919876543210,919123456789"
 const WHATSAPP_RECIPIENTS = (process.env.WHATSAPP_RECIPIENTS ?? '').split(',').map((n) => n.trim()).filter(Boolean);
 
 function todayISO() {
   return new Date().toISOString().split('T')[0];
 }
 
-async function buildSummaryMessage(date: string, hotelName: string): Promise<string> {
+interface SummaryData {
+  hotelName: string;
+  fmtDate: string;
+  statsBlock: string;
+}
+
+async function buildSummaryData(date: string, hotelName: string): Promise<SummaryData> {
   const [{ data: sale }, { data: payments }, { data: expenses }] = await Promise.all([
     supabase.from('daily_sales').select('*').eq('user_id', OWNER_USER_ID).eq('sale_date', date).maybeSingle(),
     supabase
@@ -35,33 +40,33 @@ async function buildSummaryMessage(date: string, hotelName: string): Promise<str
     weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
   });
 
-  let msg = `*${hotelName} — Daily Summary*\n${fmtDate}\n\n`;
-  msg += `📥 *Bills Collected:* ₹${income.toFixed(0)} (${orderCount} orders)\n\n`;
+  const lines: string[] = [];
+  lines.push(`Bills Collected: Rs.${income.toFixed(0)} (${orderCount} orders)`);
 
   if ((payments ?? []).length > 0) {
-    msg += `👤 *Staff Payments:*\n`;
+    lines.push('');
+    lines.push('Staff Payments:');
     payments!.forEach((p: any) => {
       const name = p.employees?.name ?? 'Unknown';
-      msg += `  • ${name} — ₹${parseFloat(p.amount).toFixed(0)}${p.note ? ` (${p.note})` : ''}\n`;
+      lines.push(`- ${name}: Rs.${parseFloat(p.amount).toFixed(0)}${p.note ? ` (${p.note})` : ''}`);
     });
-    msg += '\n';
   }
-
   if ((expenses ?? []).length > 0) {
-    msg += `🧾 *Cash Expenses:*\n`;
+    lines.push('');
+    lines.push('Cash Expenses:');
     expenses!.forEach((e) => {
-      msg += `  • ${e.description} — ₹${parseFloat(String(e.amount)).toFixed(0)}\n`;
+      lines.push(`- ${e.description}: Rs.${parseFloat(String(e.amount)).toFixed(0)}`);
     });
-    msg += '\n';
   }
 
-  msg += `💰 *Total Out:* ₹${totalOut.toFixed(0)}\n`;
-  msg += `📊 *Net Balance:* ${balance >= 0 ? '' : '-'}₹${Math.abs(balance).toFixed(0)}`;
+  lines.push('');
+  lines.push(`Total Out: Rs.${totalOut.toFixed(0)}`);
+  lines.push(`Net Balance: ${balance >= 0 ? '' : '-'}Rs.${Math.abs(balance).toFixed(0)}`);
 
-  return msg;
+  return { hotelName, fmtDate, statsBlock: lines.join('\n') };
 }
 
-async function sendWhatsAppTo(recipient: string, text: string) {
+async function sendTemplateTo(recipient: string, data: SummaryData) {
   const url = `https://graph.facebook.com/v25.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
   const res = await fetch(url, {
     method: 'POST',
@@ -72,8 +77,21 @@ async function sendWhatsAppTo(recipient: string, text: string) {
     body: JSON.stringify({
       messaging_product: 'whatsapp',
       to: recipient,
-      type: 'text',
-      text: { body: text },
+      type: 'template',
+      template: {
+        name: 'daily_summary',
+        language: { code: 'en' },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: data.hotelName },
+              { type: 'text', text: data.fmtDate },
+              { type: 'text', text: data.statsBlock },
+            ],
+          },
+        ],
+      },
     }),
   });
   const body = await res.json();
@@ -91,13 +109,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
 
     const hotelName = settings?.hotel_name ?? 'Restaurant';
-    const message = await buildSummaryMessage(date, hotelName);
+    const summary = await buildSummaryData(date, hotelName);
 
     if (WHATSAPP_RECIPIENTS.length === 0) {
       return res.status(400).json({ error: 'No recipients configured (WHATSAPP_RECIPIENTS is empty)' });
     }
 
-    const results = await Promise.allSettled(WHATSAPP_RECIPIENTS.map((r) => sendWhatsAppTo(r, message)));
+    const results = await Promise.allSettled(WHATSAPP_RECIPIENTS.map((r) => sendTemplateTo(r, summary)));
     const failures = results
       .map((r, i) => (r.status === 'rejected' ? `${WHATSAPP_RECIPIENTS[i]}: ${(r as PromiseRejectedResult).reason}` : null))
       .filter(Boolean);
@@ -105,7 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (failures.length > 0) {
       return res.status(207).json({ ok: false, sentTo: WHATSAPP_RECIPIENTS.length - failures.length, failures });
     }
-    return res.status(200).json({ ok: true, sentTo: WHATSAPP_RECIPIENTS.length, message });
+    return res.status(200).json({ ok: true, sentTo: WHATSAPP_RECIPIENTS.length });
   } catch (e: any) {
     console.error(e);
     return res.status(500).json({ error: e.message || 'Failed to send summary' });
