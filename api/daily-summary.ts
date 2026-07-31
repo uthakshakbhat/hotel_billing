@@ -12,6 +12,12 @@ function todayISO() {
   return new Date().toISOString().split('T')[0];
 }
 
+// WhatsApp template PARAMETER values (unlike the template's own static text)
+// cannot contain newlines/tabs or 4+ consecutive spaces.
+function sanitizeParam(text: string): string {
+  return text.replace(/[\n\t]+/g, ' | ').replace(/ {2,}/g, ' ').trim();
+}
+
 interface SummaryData {
   hotelName: string;
   fmtDate: string;
@@ -40,30 +46,26 @@ async function buildSummaryData(date: string, hotelName: string): Promise<Summar
     weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
   });
 
-  const lines: string[] = [];
-  lines.push(`Bills Collected: Rs.${income.toFixed(0)} (${orderCount} orders)`);
+  const parts: string[] = [];
+  parts.push(`Bills Collected: Rs.${income.toFixed(0)} (${orderCount} orders)`);
 
   if ((payments ?? []).length > 0) {
-    lines.push('');
-    lines.push('Staff Payments:');
-    payments!.forEach((p: any) => {
-      const name = p.employees?.name ?? 'Unknown';
-      lines.push(`- ${name}: Rs.${parseFloat(p.amount).toFixed(0)}${p.note ? ` (${p.note})` : ''}`);
-    });
+    const list = payments!
+      .map((p: any) => `${p.employees?.name ?? 'Unknown'}: Rs.${parseFloat(p.amount).toFixed(0)}${p.note ? ` (${p.note})` : ''}`)
+      .join(', ');
+    parts.push(`Staff Payments - ${list}`);
   }
   if ((expenses ?? []).length > 0) {
-    lines.push('');
-    lines.push('Cash Expenses:');
-    expenses!.forEach((e) => {
-      lines.push(`- ${e.description}: Rs.${parseFloat(String(e.amount)).toFixed(0)}`);
-    });
+    const list = expenses!.map((e) => `${e.description}: Rs.${parseFloat(String(e.amount)).toFixed(0)}`).join(', ');
+    parts.push(`Cash Expenses - ${list}`);
   }
 
-  lines.push('');
-  lines.push(`Total Out: Rs.${totalOut.toFixed(0)}`);
-  lines.push(`Net Balance: ${balance >= 0 ? '' : '-'}Rs.${Math.abs(balance).toFixed(0)}`);
+  parts.push(`Total Out: Rs.${totalOut.toFixed(0)}`);
+  parts.push(`Net Balance: ${balance >= 0 ? '' : '-'}Rs.${Math.abs(balance).toFixed(0)}`);
 
-  return { hotelName, fmtDate, statsBlock: lines.join('\n') };
+  const statsBlock = sanitizeParam(parts.join(' | '));
+
+  return { hotelName: sanitizeParam(hotelName), fmtDate: sanitizeParam(fmtDate), statsBlock };
 }
 
 async function sendTemplateTo(recipient: string, data: SummaryData) {
