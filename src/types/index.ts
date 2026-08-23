@@ -21,7 +21,9 @@ export interface Order {
   id: number;
   table_number: number;
   total: number;
-  status: 'printed' | 'paid';
+  status: 'active' | 'missed';
+  payment_method: 'cash' | 'upi_pending' | 'upi_confirmed';
+  bharatpe_utr: string | null;
   created_at: string;
   user_id: string;
 }

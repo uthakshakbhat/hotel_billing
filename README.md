@@ -73,3 +73,41 @@ export default defineConfig([
 ])
 
 ```
+
+## BharatPe reconciliation setup
+
+1. **Run the migration.** Open Supabase → SQL Editor → paste and run
+   `supabase/sql/002_bharatpe_integration.sql`. This adds `payment_method`
+   and `bharatpe_utr` to `orders`, and creates `bharatpe_transactions`.
+2. **Deploy the edge function.** With the Supabase CLI:
+   ```
+   supabase functions deploy bharatpe-webhook
+   supabase secrets set BHARATPE_SHARED_SECRET=<pick a long random string>
+   ```
+   (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are usually already
+   available to functions on your project automatically — check
+   Project Settings → Edge Functions if the function can't reach the DB.)
+3. **Point the Android app at it.** In the Anuradha Bill Sync app on the
+   BharatPe phone, set Webhook URL to
+   `https://<your-project-ref>.functions.supabase.co/bharatpe-webhook`
+   and Shared Secret to the same string from step 2.
+4. **Send a test event** from the app and confirm a row appears in
+   `bharatpe_transactions` with `sender = 'TEST'`.
+
+### What changed in the app
+- Printing a bill now counts it toward the day's total immediately —
+  there's no more manual "Mark as Paid" step.
+- The UPI QR on every printed bill now embeds that order's ID
+  (`AHB-<id>`) in the payment note, which is what lets a BharatPe payment
+  be matched back to the exact bill instead of guessed at.
+- **Order History** now shows two actions on an open bill: **Cash** (tag
+  it as cash-collected, one tap) and **Miss Bill** (void a bill that was
+  created by mistake — pulls it back out of the day's total).
+- Orders auto-flip to "UPI CONFIRMED" once the matching BharatPe
+  transaction arrives — no action needed for the normal case.
+
+### Still open
+`bharatpe_transactions` rows with `matched_order_id IS NULL` are the
+"needs review" queue (walk-in UPI payments, ambiguous amount collisions).
+There's no in-app screen for that queue yet — for now it's a query away in
+the SQL editor. Say the word if you want a small tab added for it.

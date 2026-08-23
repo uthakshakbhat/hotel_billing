@@ -64,18 +64,21 @@ export function BillPanel({
     }
     setPrinting(true);
     try {
+      let orderRef: number | undefined;
+      try {
+        const saved = await saveOrderToDB(currentTable + 1, tableOrder, menuItems);
+        orderRef = saved.orderId;
+      } catch (e) {
+        console.error('Order save failed — printing without BharatPe matching:', e);
+      }
       const bytes = await buildBillEscPosBytes({
         tableOrder,
         menuItems,
         tableNumber: currentTable + 1,
         hotelName,
         upiId,
+        orderRef,
       });
-      try {
-        await saveOrderToDB(currentTable + 1, tableOrder, menuItems);
-      } catch (e) {
-        console.error('Order save failed:', e);
-      }
       await sendBytes(bytes);
     } catch (e) {
       console.error(e);

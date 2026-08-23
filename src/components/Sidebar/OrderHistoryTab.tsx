@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { missBill, markCash } from '../../utils/saveOrder';
 
 interface HistoryOrder {
   id: number;
   table_number: number;
   total: number;
-  status: 'printed' | 'paid';
+  status: 'active' | 'missed';
+  payment_method: 'cash' | 'upi_pending' | 'upi_confirmed';
   created_at: string;
   order_items: { item_name: string; quantity: number }[];
 }
+
+const PAYMENT_LABEL: Record<HistoryOrder['payment_method'], string> = {
+  cash: '💵 CASH',
+  upi_pending: '⏳ UPI PENDING',
+  upi_confirmed: '✓ UPI CONFIRMED',
+};
 
 export function OrderHistoryTab() {
   const [orders, setOrders] = useState<HistoryOrder[]>([]);
@@ -31,17 +39,36 @@ export function OrderHistoryTab() {
 
   useEffect(() => {
     loadHistory();
+    // Orders can flip to 'upi_confirmed' in the background as BharatPe
+    // transactions get matched, so refresh periodically instead of only
+    // on manual actions.
+    const interval = setInterval(loadHistory, 20000);
+    return () => clearInterval(interval);
   }, [loadHistory]);
 
-  async function markPaid(orderId: number) {
+  async function handleMiss(orderId: number) {
+    if (!confirm('Mark this bill as a mistake? It will be removed from today\'s total.')) return;
     setUpdatingId(orderId);
-    const { error } = await supabase.from('orders').update({ status: 'paid' }).eq('id', orderId);
-    setUpdatingId(null);
-    if (error) {
-      alert('Failed to update: ' + error.message);
-      return;
+    try {
+      await missBill(orderId);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: 'missed' } : o)));
+    } catch (e: any) {
+      alert('Failed to update: ' + e.message);
+    } finally {
+      setUpdatingId(null);
     }
-    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: 'paid' } : o)));
+  }
+
+  async function handleCash(orderId: number) {
+    setUpdatingId(orderId);
+    try {
+      await markCash(orderId);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, payment_method: 'cash' } : o)));
+    } catch (e: any) {
+      alert('Failed to update: ' + e.message);
+    } finally {
+      setUpdatingId(null);
+    }
   }
 
   if (loading) {
@@ -64,6 +91,7 @@ export function OrderHistoryTab() {
         const time = new Date(o.created_at).toLocaleString('en-IN', {
           day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
         });
+        const busy = updatingId === o.id;
         return (
           <div key={o.id} className="hist-card">
             <div className="hist-top">
@@ -72,15 +100,27 @@ export function OrderHistoryTab() {
             </div>
             <div className="hist-total">
               ₹{parseFloat(String(o.total)).toFixed(2)}
-              <span className={`hist-status ${o.status}`} style={{ marginLeft: 8 }}>
-                {o.status.toUpperCase()}
+              <span className={`hist-status ${o.status === 'missed' ? 'missed' : o.payment_method}`} style={{ marginLeft: 8 }}>
+                {o.status === 'missed' ? 'MISSED' : PAYMENT_LABEL[o.payment_method]}
               </span>
             </div>
             <div className="hist-items">{itemsSummary}</div>
-            {o.status === 'printed' && (
-              <button className="mark-paid-btn" onClick={() => markPaid(o.id)} disabled={updatingId === o.id}>
-                {updatingId === o.id ? 'Saving...' : '✓ Mark as Paid'}
-              </button>
+            {o.status === 'active' && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                {o.payment_method === 'upi_pending' && (
+                  <button className="mark-paid-btn" onClick={() => handleCash(o.id)} disabled={busy} style={{ flex: 1 }}>
+                    {busy ? '...' : '💵 Cash'}
+                  </button>
+                )}
+                <button
+                  className="mark-paid-btn"
+                  onClick={() => handleMiss(o.id)}
+                  disabled={busy}
+                  style={{ flex: 1, background: 'var(--red)' }}
+                >
+                  {busy ? '...' : '✕ Miss Bill'}
+                </button>
+              </div>
             )}
           </div>
         );

@@ -257,8 +257,10 @@
   .hist-total{font-size:18px;font-weight:700;color:var(--gold);margin-bottom:6px;}
   .hist-items{font-size:14px;color:var(--text-muted);line-height:1.6;}
   .hist-status{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:500;letter-spacing:0.5px;}
-  .hist-status.printed{background:rgba(201,168,76,0.15);color:var(--gold);}
-  .hist-status.paid{background:rgba(76,175,122,0.15);color:var(--green);}
+  .hist-status.upi_pending{background:rgba(201,168,76,0.15);color:var(--gold);}
+  .hist-status.upi_confirmed{background:rgba(76,175,122,0.15);color:var(--green);}
+  .hist-status.cash{background:rgba(94,234,212,0.15);color:var(--gold-light);}
+  .hist-status.missed{background:rgba(239,95,90,0.15);color:var(--red);}
   .mark-paid-btn{background:none;border:1px solid var(--green);border-radius:6px;color:var(--green);font-size:13px;padding:3px 9px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px;}
   .mark-paid-btn:active{background:rgba(76,175,122,0.15);}
   .hist-empty{text-align:center;color:var(--text-muted);font-size:15px;padding:30px 10px;}

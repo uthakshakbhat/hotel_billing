@@ -99,6 +99,7 @@ interface BillPrintOptions {
   tableNumber: number; // 1-indexed, for display
   hotelName: string;
   upiId: string;
+  orderRef?: number; // order id, embedded in the UPI note for BharatPe matching
 }
 
 // Build raw ESC/POS bytes for a bill (58mm / 32-char width)
@@ -108,6 +109,7 @@ export async function buildBillEscPosBytes({
   tableNumber,
   hotelName,
   upiId,
+  orderRef,
 }: BillPrintOptions): Promise<Uint8Array> {
   const entries = Object.entries(tableOrder).filter(([, qty]) => qty > 0);
   const total = entries.reduce((sum, [itemId, qty]) => {
@@ -151,7 +153,8 @@ export async function buildBillEscPosBytes({
   push('--------------------------------\n');
 
   cmd(ESC, 0x61, 0x01);
-  const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(hotelName)}&am=${total.toFixed(2)}&cu=INR&tn=${encodeURIComponent('Table ' + tableNumber)}`;
+  const note = orderRef ? `AHB-${orderRef}` : `Table ${tableNumber}`;
+  const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(hotelName)}&am=${total.toFixed(2)}&cu=INR&tn=${encodeURIComponent(note)}`;
   const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiUrl)}`;
   try {
     const qrBytes = await imageUrlToEscPosRaster(qrImgUrl, 300);
