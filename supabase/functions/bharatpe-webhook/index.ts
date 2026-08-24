@@ -40,6 +40,7 @@ Deno.serve(async (req: Request) => {
 
   const providedSecret = req.headers.get('X-Shared-Secret');
   if (!SHARED_SECRET || providedSecret !== SHARED_SECRET) {
+    console.log('Rejected: shared secret missing or mismatched');
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -47,19 +48,22 @@ Deno.serve(async (req: Request) => {
   try {
     event = await req.json();
   } catch {
+    console.log('Rejected: request body was not valid JSON');
     return new Response('Invalid JSON', { status: 400 });
   }
 
+  console.log(`Received event: sender=${event.sender} amount=${event.amount} utr=${event.utr || '(none)'}`);
+
   const amount = parseFloat(event.amount);
   if (!amount || amount <= 0) {
+    console.log(`Rejected: invalid amount "${event.amount}"`);
     return new Response(JSON.stringify({ ok: false, reason: 'invalid amount' }), { status: 400 });
   }
 
-  // Test events from the app's "Send Test Event" button — acknowledge but
-  // never let them touch real order data.
-  if (event.sender === 'TEST') {
-    return new Response(JSON.stringify({ ok: true, test: true }), { status: 200 });
-  }
+  // Test events from the app's "Send Test Event" button — still logged so
+  // you have something to check in the table, but hard-excluded from ever
+  // touching order-matching logic below.
+  const isTestEvent = event.sender === 'TEST';
 
   // --- Idempotency: has this exact transaction been seen before? ---
   const orFilters = [`client_event_id.eq.${event.client_event_id}`];
@@ -72,19 +76,24 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (alreadySeen) {
+    console.log('Duplicate — already recorded, skipping.');
     return new Response(JSON.stringify({ ok: true, duplicate: true }), { status: 200 });
   }
 
-  // --- Try to match against an open, unconfirmed order ---
+  // --- Try to match against an open, unconfirmed order (skipped for test events) ---
   const receivedAt = new Date(event.received_at_epoch_ms || Date.now());
   const windowStart = new Date(receivedAt.getTime() - MATCH_WINDOW_MINUTES * 60_000).toISOString();
 
-  const { data: candidates } = await supabase
-    .from('orders')
-    .select('*')
-    .eq('status', 'active')
-    .eq('payment_method', 'upi_pending')
-    .gte('created_at', windowStart);
+  let candidates: any[] | null = null;
+  if (!isTestEvent) {
+    const { data } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('status', 'active')
+      .eq('payment_method', 'upi_pending')
+      .gte('created_at', windowStart);
+    candidates = data;
+  }
 
   let matchedOrder: any = null;
   let matchMethod: string | null = null;
@@ -113,7 +122,13 @@ Deno.serve(async (req: Request) => {
     // rather than guessing.
   }
 
-  // --- Record the transaction (always, matched or not) ---
+  console.log(
+    isTestEvent
+      ? 'Test event — inserting for verification, order matching skipped.'
+      : `Match result: ${matchedOrder ? `matched order ${matchedOrder.id} via ${matchMethod}` : 'no match — needs manual review'}`
+  );
+
+  // --- Record the transaction (always, matched or not, test or real) ---
   const { error: insertErr } = await supabase.from('bharatpe_transactions').insert([
     {
       utr: event.utr || null,
@@ -123,7 +138,7 @@ Deno.serve(async (req: Request) => {
       sender: event.sender,
       received_at: receivedAt.toISOString(),
       matched_order_id: matchedOrder?.id ?? null,
-      match_method: matchMethod,
+      match_method: isTestEvent ? 'test' : matchMethod,
     },
   ]);
 
@@ -131,11 +146,14 @@ Deno.serve(async (req: Request) => {
     // Unique constraint race (two requests for the same txn at once) is
     // fine to treat as a duplicate rather than an error.
     if (insertErr.code === '23505') {
+      console.log('Duplicate (race on insert) — treating as already recorded.');
       return new Response(JSON.stringify({ ok: true, duplicate: true }), { status: 200 });
     }
-    console.error('Insert failed:', insertErr);
+    console.error('Insert into bharatpe_transactions failed:', insertErr);
     return new Response(JSON.stringify({ ok: false, error: insertErr.message }), { status: 500 });
   }
+
+  console.log(isTestEvent ? 'Test event recorded successfully.' : 'Transaction recorded successfully.');
 
   // --- If matched, settle the order (never insert new revenue here) ---
   if (matchedOrder) {
@@ -146,6 +164,8 @@ Deno.serve(async (req: Request) => {
 
     if (updateErr) {
       console.error('Order update failed:', updateErr);
+    } else {
+      console.log(`Order ${matchedOrder.id} marked upi_confirmed.`);
     }
   }
 
