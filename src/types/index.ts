@@ -24,6 +24,7 @@ export interface Order {
   status: 'active' | 'missed';
   payment_method: 'cash' | 'upi_pending' | 'upi_confirmed';
   bharatpe_utr: string | null;
+  source: 'app' | 'bharatpe'; // 'bharatpe' = auto-created from an unmatched BharatPe payment, no bill was printed
   created_at: string;
   user_id: string;
 }

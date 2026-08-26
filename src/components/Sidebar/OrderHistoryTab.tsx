@@ -5,6 +5,7 @@ import { missBill, markCash } from '../../utils/saveOrder';
 interface HistoryOrder {
   id: number;
   table_number: number;
+  source: 'app' | 'bharatpe';
   total: number;
   status: 'active' | 'missed';
   payment_method: 'cash' | 'upi_pending' | 'upi_confirmed';
@@ -87,7 +88,9 @@ export function OrderHistoryTab() {
   return (
     <>
       {orders.map((o) => {
-        const itemsSummary = o.order_items.map((it) => `${it.item_name} x${it.quantity}`).join(', ');
+        const itemsSummary =
+          o.order_items.map((it) => `${it.item_name} x${it.quantity}`).join(', ') ||
+          (o.source === 'bharatpe' ? 'No printed bill — payment recorded directly' : '');
         const time = new Date(o.created_at).toLocaleString('en-IN', {
           day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
         });
@@ -95,7 +98,7 @@ export function OrderHistoryTab() {
         return (
           <div key={o.id} className="hist-card">
             <div className="hist-top">
-              <div className="hist-tbl">Table {o.table_number}</div>
+              <div className="hist-tbl">{o.source === 'bharatpe' ? '📲 BharatPe (no bill)' : `Table ${o.table_number}`}</div>
               <div className="hist-time">{time}</div>
             </div>
             <div className="hist-total">

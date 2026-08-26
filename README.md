@@ -81,16 +81,21 @@ export default defineConfig([
    and `bharatpe_utr` to `orders`, and creates `bharatpe_transactions`.
 2. **Deploy the edge function.** With the Supabase CLI:
    ```
-   supabase functions deploy bharatpe-webhook
+   supabase functions deploy bharatpe-webhook --no-verify-jwt
    supabase secrets set BHARATPE_SHARED_SECRET=<pick a long random string>
    ```
+   `--no-verify-jwt` matters here — without it, Supabase's own gateway rejects
+   every request before it even reaches our code (since the Android app
+   sends our custom shared-secret header, not a Supabase auth token). Our
+   function does its own auth via `X-Shared-Secret`, so this is safe.
    (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are usually already
    available to functions on your project automatically — check
    Project Settings → Edge Functions if the function can't reach the DB.)
 3. **Point the Android app at it.** In the Anuradha Bill Sync app on the
    BharatPe phone, set Webhook URL to
-   `https://<your-project-ref>.functions.supabase.co/bharatpe-webhook`
-   and Shared Secret to the same string from step 2.
+   `https://<your-project-ref>.supabase.co/functions/v1/bharatpe-webhook`
+   (note: **not** `<ref>.functions.supabase.co` — that's not a real
+   Supabase domain) and Shared Secret to the same string from step 2.
 4. **Send a test event** from the app and confirm a row appears in
    `bharatpe_transactions` with `sender = 'TEST'`.
 

@@ -1,15 +1,23 @@
 // Supabase Edge Function — deploy with:
 //   supabase functions deploy bharatpe-webhook
+// (verify_jwt is set to false in supabase/config.toml so this doesn't
+// need --no-verify-jwt passed on every deploy)
 //
 // Required secrets (set with `supabase secrets set KEY=value`):
 //   BHARATPE_SHARED_SECRET   — must match what's configured in the Android app
 //   SUPABASE_URL              — usually auto-provided by the platform
 //   SUPABASE_SERVICE_ROLE_KEY — service role key (bypasses RLS; needed to write)
 //
-// This function is the ONLY thing that ever creates a daily_sales entry
-// from a BharatPe transaction — it never adds new revenue on its own. It
-// only settles an order that was already counted when the bill was
-// printed. That's what prevents double-counting.
+// What this does with a BharatPe payment, in order:
+//   1. Exactly one open printed bill matches (by note or by amount+time)
+//      -> settle that bill. No new revenue — it was already counted when
+//         the bill was printed.
+//   2. No open printed bill matches at all -> this payment was collected
+//      without printing (the "too busy to print" case) -> auto-create a
+//      new confirmed order for it directly, and add it to today's total.
+//   3. Two or more open printed bills match the same amount -> ambiguous,
+//      could be any of them -> leave unmatched for manual review. Auto-
+//      creating here would risk double-counting a bill that WAS printed.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -31,6 +39,35 @@ interface IncomingEvent {
   sender: string;
   received_at_epoch_ms: number;
   client_event_id: string;
+}
+
+// Mirrors the client-side adjustDailySale in src/utils/saveOrder.ts — kept
+// in sync deliberately, since this is the one other place revenue can be
+// added to the ledger.
+async function adjustDailySale(saleDate: string, amountDelta: number, orderCountDelta: number) {
+  const { data: existing } = await supabase.from('daily_sales').select('*').eq('sale_date', saleDate).maybeSingle();
+  if (existing) {
+    await supabase
+      .from('daily_sales')
+      .update({
+        total_amount: Math.max(0, parseFloat(existing.total_amount) + amountDelta),
+        order_count: Math.max(0, existing.order_count + orderCountDelta),
+      })
+      .eq('sale_date', saleDate);
+  } else if (amountDelta > 0) {
+    await supabase.from('daily_sales').insert([{ sale_date: saleDate, total_amount: amountDelta, order_count: 1 }]);
+  }
+}
+
+// Only text that actually says a payment was RECEIVED is treated as a
+// payment at all. This is deliberately a whitelist, not a blacklist of
+// known-bad wordings (settlement notices, refunds, failed-payment alerts,
+// etc.) — a blacklist can't anticipate every non-payment message BharatPe
+// might ever send, and since an unmatched "payment" now directly creates a
+// ledger entry, a false positive here would inject fake revenue.
+function looksLikeReceivedPayment(rawMessage: string): boolean {
+  const lower = rawMessage.toLowerCase();
+  return lower.includes('received') && !lower.includes('settlement');
 }
 
 Deno.serve(async (req: Request) => {
@@ -62,8 +99,15 @@ Deno.serve(async (req: Request) => {
 
   // Test events from the app's "Send Test Event" button — still logged so
   // you have something to check in the table, but hard-excluded from ever
-  // touching order-matching logic below.
+  // touching order-matching or ledger logic below.
   const isTestEvent = event.sender === 'TEST';
+
+  if (!isTestEvent && !looksLikeReceivedPayment(event.raw_message || '')) {
+    console.log('Rejected: message does not look like a received payment (e.g. a settlement notice) — not stored.');
+    return new Response(JSON.stringify({ ok: true, ignored: true, reason: 'not a payment notification' }), {
+      status: 200,
+    });
+  }
 
   // --- Idempotency: has this exact transaction been seen before? ---
   const orFilters = [`client_event_id.eq.${event.client_event_id}`];
@@ -80,7 +124,7 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ ok: true, duplicate: true }), { status: 200 });
   }
 
-  // --- Try to match against an open, unconfirmed order (skipped for test events) ---
+  // --- Try to match against an open, unconfirmed printed bill (skipped for test events) ---
   const receivedAt = new Date(event.received_at_epoch_ms || Date.now());
   const windowStart = new Date(receivedAt.getTime() - MATCH_WINDOW_MINUTES * 60_000).toISOString();
 
@@ -97,8 +141,11 @@ Deno.serve(async (req: Request) => {
 
   let matchedOrder: any = null;
   let matchMethod: string | null = null;
+  let ambiguous = false;
 
-  // Priority 1: note reference (AHB-<orderId>) found in the raw SMS text.
+  // Priority 1: note reference (AHB-<orderId>) found in the raw SMS/RCS text.
+  // (BharatPe's own app notification doesn't carry this — only the SMS/RCS
+  // channel does, when present — so this is a bonus signal, not the norm.)
   if (candidates && candidates.length > 0) {
     const noteMatch = event.raw_message?.match(/AHB-(\d+)/);
     if (noteMatch) {
@@ -111,24 +158,70 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Priority 2: exactly one open order with this amount in the time window.
+  // Priority 2: exactly one open printed bill with this amount in the window.
   if (!matchedOrder && candidates) {
     const amountMatches = candidates.filter((o) => Math.abs(parseFloat(String(o.total)) - amount) < 0.01);
     if (amountMatches.length === 1) {
       matchedOrder = amountMatches[0];
       matchMethod = 'amount_time_window';
+    } else if (amountMatches.length > 1) {
+      // 2+ open printed bills share this amount — could be any of them.
+      // Do NOT auto-create here: one of these almost certainly IS the real
+      // match, so creating a new order on top would double-count revenue
+      // that was already counted when that bill was printed.
+      ambiguous = true;
     }
-    // 0 or 2+ candidates: ambiguous or no match — leave for manual review
-    // rather than guessing.
+    // amountMatches.length === 0 falls through below: no printed bill
+    // exists for this amount at all, so it's safe to auto-create one.
+  }
+
+  let autoCreatedOrder: any = null;
+
+  if (!isTestEvent && !matchedOrder && !ambiguous) {
+    // No open printed bill matches — this was collected without printing.
+    // Create the bill directly so it still counts in today's total.
+    const saleDate = receivedAt.toISOString().split('T')[0];
+    const { data: newOrder, error: createErr } = await supabase
+      .from('orders')
+      .insert([
+        {
+          table_number: 0, // no table — this order didn't come from the app
+          total: amount,
+          status: 'active',
+          payment_method: 'upi_confirmed', // already paid, by definition
+          bharatpe_utr: event.utr || null,
+          source: 'bharatpe',
+          created_at: receivedAt.toISOString(),
+        },
+      ])
+      .select()
+      .single();
+
+    if (createErr) {
+      console.error('Auto-create order failed:', createErr);
+    } else {
+      autoCreatedOrder = newOrder;
+      await adjustDailySale(saleDate, amount, 1);
+      console.log(`Auto-created order ${newOrder.id} for ₹${amount} (no printed bill matched) — added to ${saleDate} total.`);
+    }
   }
 
   console.log(
     isTestEvent
       ? 'Test event — inserting for verification, order matching skipped.'
-      : `Match result: ${matchedOrder ? `matched order ${matchedOrder.id} via ${matchMethod}` : 'no match — needs manual review'}`
+      : matchedOrder
+      ? `Match result: matched order ${matchedOrder.id} via ${matchMethod}`
+      : autoCreatedOrder
+      ? `Match result: no printed bill found — auto-created order ${autoCreatedOrder.id}`
+      : ambiguous
+      ? 'Match result: ambiguous (2+ open bills same amount) — needs manual review'
+      : 'Match result: no match — needs manual review'
   );
 
-  // --- Record the transaction (always, matched or not, test or real) ---
+  // --- Record the transaction (always, whatever the outcome) ---
+  const finalMatchedId = matchedOrder?.id ?? autoCreatedOrder?.id ?? null;
+  const finalMatchMethod = isTestEvent ? 'test' : matchedOrder ? matchMethod : autoCreatedOrder ? 'auto_created' : null;
+
   const { error: insertErr } = await supabase.from('bharatpe_transactions').insert([
     {
       utr: event.utr || null,
@@ -137,8 +230,8 @@ Deno.serve(async (req: Request) => {
       raw_message: event.raw_message,
       sender: event.sender,
       received_at: receivedAt.toISOString(),
-      matched_order_id: matchedOrder?.id ?? null,
-      match_method: isTestEvent ? 'test' : matchMethod,
+      matched_order_id: finalMatchedId,
+      match_method: finalMatchMethod,
     },
   ]);
 
@@ -155,7 +248,7 @@ Deno.serve(async (req: Request) => {
 
   console.log(isTestEvent ? 'Test event recorded successfully.' : 'Transaction recorded successfully.');
 
-  // --- If matched, settle the order (never insert new revenue here) ---
+  // --- If matched to an existing printed bill, settle it (never add new revenue here) ---
   if (matchedOrder) {
     const { error: updateErr } = await supabase
       .from('orders')
@@ -170,7 +263,13 @@ Deno.serve(async (req: Request) => {
   }
 
   return new Response(
-    JSON.stringify({ ok: true, matched: !!matchedOrder, matchMethod, orderId: matchedOrder?.id ?? null }),
+    JSON.stringify({
+      ok: true,
+      matched: !!matchedOrder,
+      autoCreated: !!autoCreatedOrder,
+      matchMethod: finalMatchMethod,
+      orderId: finalMatchedId,
+    }),
     { status: 200 }
   );
 });
