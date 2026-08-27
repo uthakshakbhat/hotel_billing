@@ -1,0 +1,6 @@
+# Bakes settings into the project so they don't depend on remembering CLI
+# flags on every deploy. Without this, `supabase functions deploy` defaults
+# to requiring a Supabase auth token on every request, which blocks the
+# Android app's requests before they ever reach our own shared-secret check.
+[functions.bharatpe-webhook]
+verify_jwt = false
