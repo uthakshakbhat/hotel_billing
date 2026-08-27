@@ -24,6 +24,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const SHARED_SECRET = Deno.env.get('BHARATPE_SHARED_SECRET')!;
+// This app is single-restaurant/single-owner — every existing row in
+// orders/daily_sales carries the same user_id. Rows written by this
+// function (via the service-role key, which has no logged-in user of its
+// own) need that same value set explicitly, or they end up invisible to
+// the app's user-scoped views despite being written successfully.
+const RESTAURANT_USER_ID = Deno.env.get('RESTAURANT_USER_ID') || null;
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -43,20 +49,47 @@ interface IncomingEvent {
 
 // Mirrors the client-side adjustDailySale in src/utils/saveOrder.ts — kept
 // in sync deliberately, since this is the one other place revenue can be
-// added to the ledger.
-async function adjustDailySale(saleDate: string, amountDelta: number, orderCountDelta: number) {
-  const { data: existing } = await supabase.from('daily_sales').select('*').eq('sale_date', saleDate).maybeSingle();
+// added to the ledger. Every step now checks and logs its own errors —
+// previously this failed completely silently, which is why 31 real
+// payments auto-created orders correctly but never showed up in the
+// ledger with zero trace anywhere of why.
+async function adjustDailySale(saleDate: string, amountDelta: number, orderCountDelta: number): Promise<boolean> {
+  const { data: existing, error: selectErr } = await supabase
+    .from('daily_sales')
+    .select('*')
+    .eq('sale_date', saleDate)
+    .maybeSingle();
+
+  if (selectErr) {
+    console.error(`adjustDailySale: select failed for ${saleDate}:`, selectErr);
+    return false;
+  }
+
   if (existing) {
-    await supabase
+    const { error: updateErr } = await supabase
       .from('daily_sales')
       .update({
         total_amount: Math.max(0, parseFloat(existing.total_amount) + amountDelta),
         order_count: Math.max(0, existing.order_count + orderCountDelta),
       })
       .eq('sale_date', saleDate);
+
+    if (updateErr) {
+      console.error(`adjustDailySale: update failed for ${saleDate}:`, updateErr);
+      return false;
+    }
   } else if (amountDelta > 0) {
-    await supabase.from('daily_sales').insert([{ sale_date: saleDate, total_amount: amountDelta, order_count: 1 }]);
+    const { error: insertErr } = await supabase
+      .from('daily_sales')
+      .insert([{ sale_date: saleDate, total_amount: amountDelta, order_count: 1, user_id: RESTAURANT_USER_ID }]);
+
+    if (insertErr) {
+      console.error(`adjustDailySale: insert failed for ${saleDate}:`, insertErr);
+      return false;
+    }
   }
+
+  return true;
 }
 
 // Only text that actually says a payment was RECEIVED is treated as a
@@ -90,6 +123,12 @@ Deno.serve(async (req: Request) => {
   }
 
   console.log(`Received event: sender=${event.sender} amount=${event.amount} utr=${event.utr || '(none)'}`);
+
+  if (!RESTAURANT_USER_ID) {
+    console.error(
+      'RESTAURANT_USER_ID secret is not set — any auto-created order or new daily_sales row from this request will be invisible in the app. Run: supabase secrets set RESTAURANT_USER_ID=<your user id>'
+    );
+  }
 
   const amount = parseFloat(event.amount);
   if (!amount || amount <= 0) {
@@ -192,6 +231,7 @@ Deno.serve(async (req: Request) => {
           bharatpe_utr: event.utr || null,
           source: 'bharatpe',
           created_at: receivedAt.toISOString(),
+          user_id: RESTAURANT_USER_ID,
         },
       ])
       .select()
@@ -201,8 +241,14 @@ Deno.serve(async (req: Request) => {
       console.error('Auto-create order failed:', createErr);
     } else {
       autoCreatedOrder = newOrder;
-      await adjustDailySale(saleDate, amount, 1);
-      console.log(`Auto-created order ${newOrder.id} for ₹${amount} (no printed bill matched) — added to ${saleDate} total.`);
+      const ledgerOk = await adjustDailySale(saleDate, amount, 1);
+      if (ledgerOk) {
+        console.log(`Auto-created order ${newOrder.id} for ₹${amount} — added to ${saleDate} total.`);
+      } else {
+        console.error(
+          `Auto-created order ${newOrder.id} for ₹${amount}, but the ${saleDate} ledger total was NOT updated — see the adjustDailySale error above.`
+        );
+      }
     }
   }
 
