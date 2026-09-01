@@ -9,6 +9,7 @@ import { CategoryFilter } from './components/Menu/CategoryFilter';
 import { MenuGrid } from './components/Menu/MenuGrid';
 import { TableBar } from './components/TableBar';
 import { BillPanel } from './components/Bill/BillPanel';
+import { BillsModal } from './components/Bill/BillsModal';
 import { LedgerModal } from './components/Ledger/LedgerModal';
 import { ManageMenuSidebar } from './components/Sidebar/ManageMenuSidebar';
 import { OpsAssistant } from './components/Assistant/OpsAssistant';
@@ -31,6 +32,7 @@ function App() {
   const { connected: btConnected, deviceName: btDeviceName, connect: connectPrinter, sendBytes } = useBluetoothPrinter();
   const [activeCategory, setActiveCategory] = useState('All');
   const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [billsOpen, setBillsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
 
@@ -58,6 +60,7 @@ function App() {
         </div>
         <div className="header-right">
           <button className="ledger-btn" onClick={() => setAssistantOpen(true)} title="Ops Assistant">🤖</button>
+          <button className="ledger-btn" onClick={() => setBillsOpen(true)} title="Review Bills">🧾</button>
           <button className="ledger-btn" onClick={() => setLedgerOpen(true)} title="Daily Ledger">📒</button>
           <button className="hamburger-btn" onClick={() => setSidebarOpen(true)} title="Manage Menu">☰</button>
           <button className="hamburger-btn" onClick={logout} title="Sign out">⏻</button>
@@ -108,6 +111,8 @@ function App() {
         btConnected={btConnected}
         sendBytes={sendBytes}
       />
+
+      <BillsModal open={billsOpen} onClose={() => setBillsOpen(false)} />
 
       <ManageMenuSidebar
         open={sidebarOpen}
