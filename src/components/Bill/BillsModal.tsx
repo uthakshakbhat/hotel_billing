@@ -1,4 +1,4 @@
-import { OrderHistoryTab } from '../Sidebar/OrderHistoryTab';
+import { ReviewBillsTab } from './ReviewBillsTab';
 
 interface BillsModalProps {
   open: boolean;
@@ -17,7 +17,7 @@ export function BillsModal({ open, onClose }: BillsModalProps) {
         </div>
 
         <div className="ledger-body">
-          {open && <OrderHistoryTab />}
+          {open && <ReviewBillsTab />}
         </div>
       </div>
     </div>

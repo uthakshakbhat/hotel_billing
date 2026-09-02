@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { CATEGORIES } from '../../utils/constants';
 import type { MenuItem } from '../../types';
+import { OrderHistoryTab } from './OrderHistoryTab';
 
-type SidebarTab = 'add' | 'manage';
+type SidebarTab = 'add' | 'manage' | 'history';
 
 interface ManageMenuSidebarProps {
   open: boolean;
@@ -26,10 +27,12 @@ export function ManageMenuSidebar({ open, onClose, items, onReload }: ManageMenu
         <div className="sidebar-tabs">
           <button className={`stab ${tab === 'add' ? 'active' : ''}`} onClick={() => setTab('add')}>Add Item</button>
           <button className={`stab ${tab === 'manage' ? 'active' : ''}`} onClick={() => setTab('manage')}>Manage</button>
+          <button className={`stab ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>History</button>
         </div>
         <div className="sidebar-content">
           {tab === 'add' && <AddItemForm onAdded={onReload} />}
           {tab === 'manage' && <ManageItemsList items={items} onChanged={onReload} />}
+          {tab === 'history' && <OrderHistoryTab />}
         </div>
       </aside>
     </>
